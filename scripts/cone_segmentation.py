@@ -43,7 +43,7 @@ def is_top_cone(aspect_ratio):
 rospack = rospkg.RosPack()
 rospack.list()
 path = rospack.get_path('detection_classic')
-filename = path + "/images/1.png"
+filename = path + "/images/3.png"
 img = cv2.imread(filename)
 # img = cv2.resize(img, (640, 360))
 (height, width, _) = img.shape
@@ -76,8 +76,6 @@ def find_bouding_boxes(min_hsv, max_hsv):
     centroids = outputs[3]
     kept_label = [True for k in range(nbr_clusters)]  # whether the cluster is kept
 
-    print("Intermediary time: {}".format(time() - init_time))
-
     # Select clusters based on geometry
     for k in range(nbr_clusters):
         area = stats[k][cv2.CC_STAT_AREA]
@@ -90,8 +88,6 @@ def find_bouding_boxes(min_hsv, max_hsv):
         if (area < min_nbr_pixels or area > max_nbr_pixels
             or aspect_ratio < min_aspect_ratio or aspect_ratio > max_aspect_ratio):
             kept_label[k] = False
-
-    print("Intermediary time 2: {}".format(time() - init_time))
 
     # Debug only
     if verbose:
@@ -129,31 +125,31 @@ def find_bouding_boxes(min_hsv, max_hsv):
             if not group_found and not label_grouped[k]:
                 groups.append([k])
 
-    print("Intermediary time 3: {}".format(time() - init_time))
-
     # Find bouding boxes around the clusters
     bounding_boxes = []
     for group in groups:
-        pixels_list = []
-
-        for k in group:
-            pxl = np.argwhere(labels == k)
-            pixels_list.extend(pxl.tolist())
-
-        pixels_array = np.array(pixels_list)
-        bb = cv2.boundingRect(pixels_array)
-
         if len(group) == 1:
+            # Only the base of the cone has been found
             k = group[0]
             h = stats[k][cv2.CC_STAT_HEIGHT]
             H = 2.5 * h
-            bb = (centroids[k][1] - H + h/2, bb[1], H, bb[3])
+            W = stats[k][cv2.CC_STAT_WIDTH]
+            c_x = centroids[k][1] - H + h/2.0
+            c_y = centroids[k][0] - W/2.0
+
+            bb = (c_x, c_y, H, W)
+        elif len(group) == 2:
+            # Both the base and the top of the cone have been found
+            k = group[0]
+            l = group[1]
+            H = abs(centroids[k][1] - centroids[l][1]) + (stats[k][cv2.CC_STAT_HEIGHT] + stats[l][cv2.CC_STAT_HEIGHT])/2.0
+            W = max(stats[k][cv2.CC_STAT_WIDTH], stats[l][cv2.CC_STAT_WIDTH])
+            c_x = (centroids[k][1] + centroids[l][1])/2.0 - H/2.0
+            c_y = (centroids[k][0] + centroids[l][0])/2.0 - W/2.0
+
+            bb = (c_x, c_y, H, W)
 
         bounding_boxes.append(bb)
-
-    print("Intermediary time 4: {}".format(time() - init_time))
-
-
 
     # Display segmentation
     # clustered_image = np.zeros((height, width))
@@ -164,10 +160,6 @@ def find_bouding_boxes(min_hsv, max_hsv):
     # plt.imshow(clustered_image)
     # plt.show()
 
-    print("---")
-    print(bounding_boxes)
-
-
     return bounding_boxes
 
 
@@ -175,7 +167,6 @@ blue_boxes = find_bouding_boxes(blue_min, blue_max)
 yellow_boxes = find_bouding_boxes(yellow_min, yellow_max)
 
 print("Total time: {}".format(time() - init_time))
-
 
 
 # Plotting the results
