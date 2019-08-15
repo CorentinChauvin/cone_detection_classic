@@ -40,6 +40,8 @@ invert = True
 gaussian_blur = False
 hist_equalisation = False
 verbose = False
+save_video = True
+save_image = True
 
 
 def is_base_cone(cluster_ratio):
@@ -348,12 +350,14 @@ if False:
     print("Total time: {}".format(time() - init_time))
 
     # Plot the results
-    # hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    # hsv[:, :, 1] = hsv[:, :, 0]
-    # hsv[:, :, 2] = hsv[:, :, 0]
     if invert:
         img = cv2.bitwise_not(img)
+
     plot_results(img, blue_boxes, yellow_boxes)
+
+    if save_image:
+        img = cv2.bitwise_not(img)
+        cv2.imwrite(path+'/output/output.png', generate_output(img, blue_boxes, yellow_boxes))
 
 else:
     # Load the video
@@ -362,6 +366,11 @@ else:
     path = rospack.get_path('detection_classic')
     file_name = path + "/images/kth.mp4"
     video = cv2.VideoCapture(file_name)
+
+    # Create video saver
+    if save_video:
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        video_out = cv2.VideoWriter(path+'/output/output.avi', fourcc, 30.0, (1920, 1080))
 
     if invert:
         (blue_min, blue_max, yellow_min, yellow_max) = (yellow_min, yellow_max, blue_min, blue_max)
@@ -375,10 +384,14 @@ else:
         yellow_boxes = find_bouding_boxes(frame, yellow_min, yellow_max, black_min, black_max)
 
         output = generate_output(frame, blue_boxes, yellow_boxes)
+        if save_video:
+            video_out.write(output)
         cv2.imshow('test', output)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     video.release()
+    if save_video:
+        video_out.release()
     cv2.destroyAllWindows()
