@@ -2,7 +2,7 @@
 """
     Attempt to detect cones with classical computer vision
 
-    execfile('cone_segmentation.py')
+    Corentin Chauvin-Hameau - KTH Formula Student 2019
 """
 
 import rospkg
@@ -11,26 +11,35 @@ import cv2
 from matplotlib import pyplot as plt
 from matplotlib.patches import Rectangle
 from time import time
+from copy import deepcopy
 
 # Tuning parameters
-min_nbr_pixels = 30      # min nbr of pixels that a cone must have
-max_nbr_pixels = 8000    # max nbr of pixels that a cone must have
+min_nbr_pixels = 50      # min nbr of pixels that a cone must have
+max_nbr_pixels = 10000   # max nbr of pixels that a cone must have
 min_cluster_ratio = 0.4  # min width/height that a cluster must have
 max_cluster_ratio = 2.0  # max width/height that a cluster must have
 lim_cluster_ratio = 1.0  # below this, top of the cone ; above, base of the cone
-min_box_ratio = 0.6      # min width/height that a box must have
-max_box_ratio = 0.9      # max width/height that a box must have
+min_box_ratio = 0.3      # min width/height that a box must have
+max_box_ratio = 1.5      # max width/height that a box must have
 group_percent = 0.3      # percentage of lateral deviation between top and base of cone to group it
+center_percent = 0.3     # threshold to consider a cluster to be in the center of the box
+gaussian_size = 2        # size of the kernel for gaussian blur
+bottom_ratio = 0.7       # ratio of the image to be kept in the vertical axis (only the bottom of the image is processed) (1.0=keep everything)
+
 blue_min = (100, 100, 100)
-blue_max = (130, 255, 255)
-yellow_min = (15, 100, 200)
-yellow_max = (30, 255, 255)
-gaussian_size = 5
+blue_max = (140, 255, 255)
+yellow_min = (10, 80, 200)
+yellow_max = (25, 255, 255)
+
+white_min = (0, 0, 200)
+white_max = (255, 30, 255)
+black_min = (0, 0, 0)
+black_max = (50, 255, 180)
 
 invert = True
 gaussian_blur = False
 hist_equalisation = False
-verbose = True
+verbose = False
 
 
 def is_base_cone(cluster_ratio):
@@ -45,22 +54,37 @@ def is_top_cone(cluster_ratio):
     return cluster_ratio <= lim_cluster_ratio and cluster_ratio >= min_cluster_ratio
 
 
-def find_bouding_boxes(img, min_hsv, max_hsv):
+def find_bouding_boxes(img, min_main, max_main, min_center, max_center):
     """
         Find the cones in the image for the given range of hsv colors
 
         Arguments:
         - img: input image
-        - min_hsv, max_hsv: range of HSV colors for segmentation
-        Returns: a list of bounding boxes corresponding to cones
+        - min_main, max_main: range of HSV colors for segmentation of base and top of cone
+        - min_center, max_center: range of HSV colors for segmentation of center stripe
+        Returns:
+        - list of bounding boxes corresponding to cones
     """
+
+    # Keep only the bottom part of the image
+    (init_height, init_width, _) = img.shape
+    x1 = (1-bottom_ratio) * init_height
+    x2 = init_height
+    img = img[int(x1):int(x2), :, :]
+    (height, width, _) = img.shape
 
     # HSV segmentation
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, min_hsv, max_hsv)
+    mask = cv2.inRange(hsv, min_main, max_main)
     img_segmented = cv2.bitwise_and(img, img, mask=mask)
 
     # cv2.imshow('image', img_segmented)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+
+    # mask2 = cv2.inRange(hsv, min_center, max_center)
+    # segmented = cv2.bitwise_and(img, img, mask=mask2)
+    # cv2.imshow('image', mask2)
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
 
@@ -105,7 +129,6 @@ def find_bouding_boxes(img, min_hsv, max_hsv):
 
     for k in range(nbr_clusters-1, -1, -1):
         # Assumption: the clustered are ordered (first ones at the top of the image)
-
         if kept_label[k]:
             w1 = stats[k][cv2.CC_STAT_WIDTH]
             h1 = stats[k][cv2.CC_STAT_HEIGHT]
@@ -113,7 +136,6 @@ def find_bouding_boxes(img, min_hsv, max_hsv):
             y1 = centroids[k][0]
             min_y = y1 - group_percent*w1
             max_y = y1 + group_percent*w1
-            # min_x =
             group_found = False
 
             for l in range(k-1, -1, -1):
@@ -158,16 +180,71 @@ def find_bouding_boxes(img, min_hsv, max_hsv):
             elif verbose:
                 print("[n] Box (W, H)=({:.0f}, {:.0f}) ; corner=({:.0f}, {:.0f}) ; ratio={:.2f}".format(bb[2], bb[3], bb[0], bb[1], ratio))
 
+    # Check for the stripe in the center of the cone
+    bb_tmp = deepcopy(bounding_boxes)
+    bounding_boxes = []
+    for bb in bb_tmp:
+        x1 = int(max(0, bb[0]))
+        x2 = int(min(height-1, x1 + bb[2]))
+        y1 = int(max(0, bb[1]))
+        y2 = int(min(width-1, y1 + bb[3]))
 
-    # Display segmentation
-    # clustered_image = np.zeros((height, width))
-    # for i in range(height):
-    #     for j in range(width):
-    #         if kept_label[labels.item(i, j)]:
-    #             clustered_image[i][j] = 255
-    # plt.imshow(clustered_image)
-    # plt.show()
+        sub_img = hsv[x1:x2+1, y1:y2+1, :]
+        mask = cv2.inRange(sub_img, min_center, max_center)
+        segmented = cv2.bitwise_and(sub_img, sub_img, mask=mask)
 
+        outputs = cv2.connectedComponentsWithStats(mask, 8)
+        nbr_clusters = outputs[0]
+        stats = outputs[2]
+        centroids = outputs[3]
+
+        if verbose:
+            print("---")
+
+        center_found = False
+        max_area = 0  # area corresponding to the background
+        for k in range(nbr_clusters):
+            if stats[k][cv2.CC_STAT_AREA] > max_area:
+                max_area = stats[k][cv2.CC_STAT_AREA]
+
+        for k in range(nbr_clusters):
+            area = stats[k][cv2.CC_STAT_AREA]
+            x = int(centroids[k][1])
+            y = int(centroids[k][0])
+            min_x = (0.4 - center_percent) * (x2 - x1)
+            max_x = (0.4 + center_percent) * (x2 - x1)
+            min_y = (0.5 - center_percent) * (y2 - y1)
+            max_y = (0.5 + center_percent) * (y2 - y1)
+
+            if verbose:
+                print("area={:.0f} ; (x, y)=({:.0f}, {:.0f}) ; bx=({:.0f}, {:.0f}) ; by=({:.0f}, {:.0f})".format(
+                    area, x, y, min_x, max_x, min_y, max_y))
+
+            if (area != max_area and area >= min_nbr_pixels
+                and x >= min_x and x <= max_x and y >= min_y and y <= max_y):
+                center_found = True
+                break
+
+        if center_found:
+            bounding_boxes.append(bb)
+        elif verbose:
+            print('rejected')
+
+        # plt.subplot(121)
+        # rgb = cv2.cvtColor(img[x1:x2+1, y1:y2+1, :], cv2.COLOR_BGR2RGB)
+        # plt.imshow(rgb)
+        # plt.subplot(122)
+        # plt.imshow(mask)
+        # plt.show()
+
+    # Offset the bounding boxes to take into account the neglicted top part
+    bb_tmp = deepcopy(bounding_boxes)
+    bounding_boxes = []
+    offset_x = int((1-bottom_ratio) * init_height)
+    for bb in bb_tmp:
+        bounding_boxes.append((bb[0] + offset_x, bb[1], bb[2], bb[3]))
+
+    # Debug
     if verbose:
         for bb in bounding_boxes:
             ratio = bb[3] / max(1.0, float(bb[2]))
@@ -190,11 +267,11 @@ def plot_results(img, blue_boxes, yellow_boxes):
     plt.imshow(rgb)
     for bb in blue_boxes:
         rect = Rectangle((bb[1], bb[0]), bb[3], bb[2],
-                        linewidth=2, edgecolor='b', facecolor='none')
+                         linewidth=2, edgecolor='b', facecolor='none')
         ax.add_patch(rect)
     for bb in yellow_boxes:
         rect = Rectangle((bb[1], bb[0]), bb[3], bb[2],
-                        linewidth=2, edgecolor='y', facecolor='none')
+                         linewidth=2, edgecolor='y', facecolor='none')
         ax.add_patch(rect)
     plt.show()
 
@@ -257,26 +334,25 @@ if False:
     path = rospack.get_path('detection_classic')
     file_name = path + "/images/7.png"
     img = cv2.imread(file_name)
-    (height, width, _) = img.shape
 
     # Image enhancement
     if invert:
         (blue_min, blue_max, yellow_min, yellow_max) = (yellow_min, yellow_max, blue_min, blue_max)
+        (white_min, white_max, black_min, black_max) = (black_min, black_max, white_min, white_max)
     img = preprocess(img)
 
     # Find the cones
     init_time = time()
-    blue_boxes = find_bouding_boxes(img, blue_min, blue_max)
-    print("---")
-    yellow_boxes = find_bouding_boxes(img, yellow_min, yellow_max)
+    blue_boxes = find_bouding_boxes(img, blue_min, blue_max, white_min, white_max)
+    yellow_boxes = find_bouding_boxes(img, yellow_min, yellow_max, black_min, black_max)
     print("Total time: {}".format(time() - init_time))
 
     # Plot the results
     # hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     # hsv[:, :, 1] = hsv[:, :, 0]
     # hsv[:, :, 2] = hsv[:, :, 0]
-    # if invert:
-    #     img = cv2.bitwise_not(img)
+    if invert:
+        img = cv2.bitwise_not(img)
     plot_results(img, blue_boxes, yellow_boxes)
 
 else:
@@ -289,14 +365,14 @@ else:
 
     if invert:
         (blue_min, blue_max, yellow_min, yellow_max) = (yellow_min, yellow_max, blue_min, blue_max)
-
+        (white_min, white_max, black_min, black_max) = (black_min, black_max, white_min, white_max)
 
     while video.isOpened():
         ret, frame = video.read()
 
         frame = preprocess(frame)
-        blue_boxes = find_bouding_boxes(frame, blue_min, blue_max)
-        yellow_boxes = find_bouding_boxes(frame, yellow_min, yellow_max)
+        blue_boxes = find_bouding_boxes(frame, blue_min, blue_max, white_min, white_max)
+        yellow_boxes = find_bouding_boxes(frame, yellow_min, yellow_max, black_min, black_max)
 
         output = generate_output(frame, blue_boxes, yellow_boxes)
         cv2.imshow('test', output)
