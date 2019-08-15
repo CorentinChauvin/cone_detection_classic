@@ -3,6 +3,10 @@
     Attempt to detect cones with classical computer vision
 
     Corentin Chauvin-Hameau - KTH Formula Student 2019
+
+    TODO:
+    - Only do segmentation in the center of the image for middle stripe searching
+    - Take into account the size of the cones with respect to the x coordinate
 """
 
 import rospkg
@@ -191,6 +195,7 @@ def find_bouding_boxes(img, min_main, max_main, min_center, max_center):
         y1 = int(max(0, bb[1]))
         y2 = int(min(width-1, y1 + bb[3]))
 
+        # TODO: only do segmentation in the center of the image (reducing computations)
         sub_img = hsv[x1:x2+1, y1:y2+1, :]
         mask = cv2.inRange(sub_img, min_center, max_center)
         segmented = cv2.bitwise_and(sub_img, sub_img, mask=mask)
